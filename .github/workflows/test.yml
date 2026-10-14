@@ -1,0 +1,39 @@
+name: Installer checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  linux-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax and invalid arguments
+        run: |
+          bash -n install.sh
+          bash install.sh --help
+          if bash install.sh --port 80; then exit 1; fi
+          if bash install.sh --version invalid; then exit 1; fi
+      - name: Install and verify real HTTP endpoints
+        run: |
+          sudo bash install.sh --port 18080
+          curl -fsS http://127.0.0.1:18080/ | grep -q 'VPS 连接测速'
+          curl -fsS http://127.0.0.1:18080/speedtest.js -o /tmp/speedtest.js
+          curl -fsS http://127.0.0.1:18080/speedtest_worker.js -o /tmp/speedtest_worker.js
+          curl -fsS 'http://127.0.0.1:18080/backend/garbage.php?ckSize=1' -o /tmp/download.bin
+          test "$(wc -c < /tmp/download.bin)" -eq 1048576
+          head -c 20971520 /dev/zero > /tmp/upload.bin
+          curl -fsS --data-binary @/tmp/upload.bin http://127.0.0.1:18080/backend/empty.php
+      - name: Reinstall and change port
+        run: |
+          sudo bash install.sh --port 18080
+          sudo bash install.sh --port 18081
+          curl -fsS http://127.0.0.1:18081/ -o /dev/null
+          systemctl is-enabled librespeed-oneclick
+          if curl -fsS --max-time 2 http://127.0.0.1:18080/; then exit 1; fi
+      - name: Uninstall
+        if: always()
+        run: |
+          sudo bash install.sh --uninstall
+          test ! -e /opt/librespeed-oneclick
+          test ! -e /etc/systemd/system/librespeed-oneclick.service
